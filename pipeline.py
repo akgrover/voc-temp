@@ -48,6 +48,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Callable, Iterator, Optional
 
+import anthropic
+import httpx
 from confluent_kafka import Consumer, KafkaError, KafkaException, Message
 
 from stage1_pii_redaction import PIIRedactor, redact_cfo
@@ -111,6 +113,11 @@ class PipelineConfig:
                             model handles them well.
         encoder_model:      Sentence-transformer for deduplication and topic
                             matching embeddings.
+
+    Credentials:
+        anthropic_api_key:  Anthropic API key for Claude API calls. If None,
+                            defaults to ANTHROPIC_API_KEY environment variable.
+        database_url:       PostgreSQL connection string for persistence. Optional.
     """
 
     # Kafka
@@ -130,6 +137,10 @@ class PipelineConfig:
     llm_model_complex: str          = "claude-sonnet-4-6"
     llm_model_simple:  str          = "claude-haiku-4-5-20251001"
     encoder_model:     str          = "all-MiniLM-L6-v2"
+
+    # Credentials
+    anthropic_api_key: Optional[str] = None
+    database_url:      Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -204,11 +215,24 @@ class FeedbackPipeline:
         # total thread count stays bounded.
         self._executor = ThreadPoolExecutor(max_workers=config.max_workers)
 
+        # Create Anthropic client with explicit API key if provided
+        # Falls back to ANTHROPIC_API_KEY environment variable if not
+        # Skip SSL verification for local development
+        http_client = httpx.Client(verify=False)
+        anthropic_client = anthropic.Anthropic(
+            api_key=config.anthropic_api_key,
+            http_client=http_client
+        ) if config.anthropic_api_key else anthropic.Anthropic(http_client=http_client)
+
+
         # Stage 1
         self._pii_redactor = PIIRedactor()
 
         # Stage 2.1 — complex: judgment-heavy text segmentation
-        self._unitizer = UnitizationAgent(model=config.llm_model_complex)
+        self._unitizer = UnitizationAgent(
+            client=anthropic_client,
+            model=config.llm_model_complex
+        )
 
         # Stage 2.2 — dedup index persists across batches
         self._dedup_store = InMemoryVectorStore()
@@ -221,10 +245,14 @@ class FeedbackPipeline:
         self._topic_extractor, self._topic_store = build_topic_extractor(
             encoder_model = config.encoder_model,
             llm_model     = config.llm_model_complex,
+            client        = anthropic_client,
         )
 
         # Stage 3.1 / 3.3 — simple: structured JSON with fixed enums
-        self._orchestrator = ExtractionOrchestrator(model=config.llm_model_simple)
+        self._orchestrator = ExtractionOrchestrator(
+            client=anthropic_client,
+            model=config.llm_model_simple
+        )
 
     # ------------------------------------------------------------------
     # Public API

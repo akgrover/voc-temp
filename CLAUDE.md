@@ -4,30 +4,51 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Setup
 
+### 1. Install dependencies
+
 ```bash
-pip install confluent-kafka anthropic sentence-transformers numpy spacy psycopg2-binary fastapi "uvicorn[standard]"
+pip install confluent-kafka anthropic sentence-transformers numpy spacy psycopg2-binary fastapi "uvicorn[standard]" python-dotenv
 python -m spacy download en_core_web_trf
 ```
 
-Initialize the database schema:
+### 2. Configure credentials
+
+Copy the template and fill in your values:
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` and add your credentials:
+- `ANTHROPIC_API_KEY` — Get one from https://console.anthropic.com
+- `DATABASE_URL` — (Optional) PostgreSQL connection string, e.g., `postgresql://user:pass@localhost:5432/voc`
+- Other settings (Kafka, models, etc.) are pre-configured with sensible defaults
+
+### 3. Initialize the database (optional)
+
+Only needed if you want to persist results to PostgreSQL:
 ```bash
 python -c "from db import PostgresStore; PostgresStore.from_url('postgresql://localhost/voc').apply_schema()"
 ```
 
 ## Running
 
-```bash
-# Start Kafka consumer (production mode)
-python pipeline.py
+**Note:** All commands below load configuration from `.env` automatically.
 
+```bash
 # Start REST API (development, auto-reload)
+# Loads config from .env; recommended for development
 uvicorn api:app --reload --port 8000
 
-# Start REST API (production; workers=1 required — TopicStore and dedup index are in-memory)
+# Start REST API (production; workers=1 required)
+# TopicStore and dedup index are in-memory, so must use single worker
 uvicorn api:app --port 8000 --workers 1
 
+# Start Kafka consumer (production mode)
+# Only needed if you have a Kafka broker set up
+python pipeline.py
+
 # Smoke-test the DB layer
-DATABASE_URL="postgresql://localhost/voc_test" python db.py
+python db.py
 ```
 
 ## Architecture
@@ -121,7 +142,7 @@ flowchart TD
 
 ### Key thresholds
 
-- `DUPLICATE_THRESHOLD = 0.95` — cosine similarity for near-duplicate detection
+- `DUPLICATE_THRESHOLD = 0.80` — cosine similarity for near-duplicate detection
 - `TOPIC_MATCH_THRESHOLD = 0.82` — embedding similarity to match existing topics
 - `NEW_TOPIC_CONF_FLOOR = 0.70` — minimum LLM confidence to promote a candidate topic
 

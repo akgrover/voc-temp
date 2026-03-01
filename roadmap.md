@@ -106,3 +106,34 @@ Introduce a `ProductKnowledgeStore` that builds and maintains a structured under
 - How to handle product pivots or renames without polluting the store with stale concepts.
 - Whether the store should be shared across all accounts (global product model) or maintained per-account (richer per-tenant signal, higher storage cost).
 - Persistence backend — the current in-memory pattern works for the dedup and topic stores because they recover quickly; product knowledge is more expensive to rebuild and likely warrants PostgreSQL persistence from the start.
+
+---
+
+### Feedback Impact & Resolution Metrics
+**Status:** Not started
+
+The pipeline currently transforms feedback into structured units and extracts topics/sentiment, but there is no visibility into business impact — what fraction of feedback is acted upon, how long actions take to implement, and how many customers benefit from resolutions.
+
+**Proposed approach:**
+
+Add a new `MetricsStore` (PostgreSQL-backed) that tracks the full lifecycle of feedback from intake to resolution:
+
+1. **Intake metrics** — total feedback items received, items analyzed (passed all pipeline stages), items triaged (assigned to a topic/team)
+2. **Action metrics** — feedback items assigned to an action, time to assignment (intake → action), owner assignment
+3. **Resolution metrics** — time to resolution (action → shipped fix/feature), customer count impacted, affected versions/feature flags
+4. **Feedback loop** — ability to mark feedback items as "resolved in version X" or "by feature Y", then automatically correlate with downstream customer communication/release notes
+
+**Schema:**
+- `feedback_impact` table: `feedback_unit_id`, `action_id` (FK to external ticket system), `assigned_at`, `resolved_at`, `resolution_type` (fixed | feature | wontfix | duplicate), `customers_impacted`
+- `metrics_snapshots` table: time-series snapshots (daily/weekly) of counts: analyzed, triaged, assigned, resolved
+
+**Integration points:**
+- REST API: new `PUT /feedback/{unit_id}/mark-resolved` endpoint to close the loop from external tools (Jira, Linear, GitHub Issues)
+- Dashboard: new views showing volume funnels (intake → analyzed → triaged → assigned → resolved) and SLAs (median time to assignment, resolution)
+- Optional webhook sink: emit resolution events to downstream systems (Slack, email, support platform)
+
+**Open questions:**
+- Whether metrics should be per-topic or per-account or global.
+- How to handle feedback items that resolve multiple issues or span multiple teams.
+- Should the system auto-ingest resolution data from connected external systems (ticket APIs) or rely on manual marking?
+- Retention and rollup strategy for metrics data over time.

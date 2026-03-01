@@ -15,7 +15,8 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-from pipeline import BatchAnalysis, FeedbackPipeline, PipelineConfig
+from config import load_pipeline_config
+from pipeline import BatchAnalysis, FeedbackPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ _pipeline: Optional[FeedbackPipeline] = None
 async def lifespan(app: FastAPI):
     global _pipeline
     if _pipeline is None:           # skip if pre-injected by start_api.py
-        cfg = PipelineConfig()
+        cfg = load_pipeline_config()
         _pipeline = FeedbackPipeline(cfg)
         logger.info("REST: pipeline initialised (max_workers=%d).", cfg.max_workers)
     yield
